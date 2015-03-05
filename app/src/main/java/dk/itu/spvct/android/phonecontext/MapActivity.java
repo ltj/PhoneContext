@@ -1,6 +1,8 @@
 package dk.itu.spvct.android.phonecontext;
 
+import android.graphics.Color;
 import android.location.Location;
+import android.os.RemoteException;
 import android.support.v7.app.ActionBarActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -16,12 +18,23 @@ import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.MapFragment;
 import com.google.android.gms.maps.OnMapReadyCallback;
+import com.google.android.gms.maps.model.CircleOptions;
 import com.google.android.gms.maps.model.LatLng;
+
+import org.altbeacon.beacon.Beacon;
+import org.altbeacon.beacon.BeaconConsumer;
+import org.altbeacon.beacon.BeaconManager;
+import org.altbeacon.beacon.RangeNotifier;
+import org.altbeacon.beacon.Region;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 
 
 public class MapActivity extends ActionBarActivity implements
         GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener,
-        LocationListener, OnMapReadyCallback {
+        LocationListener, OnMapReadyCallback, BeaconConsumer {
 
     public static final String TAG = "MapActivity";
     private GoogleMap mMap;
@@ -31,17 +44,24 @@ public class MapActivity extends ActionBarActivity implements
     protected Location mLastLocation;
     protected Location mCurrentLocation;
     protected MapFragment mMapFragment;
+    protected BeaconManager beaconManager;
+    private HashMap<String, BeaconLocation> myBeacons;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_map);
 
+        myBeacons = new HashMap<>();
+
         mMapFragment = (MapFragment) getFragmentManager()
                 .findFragmentById(R.id.map);
         mMapFragment.getMapAsync(this);
 
         buildGoogleApiClient();
+
+        beaconManager = BeaconManager.getInstanceForApplication(this);
+        beaconManager.bind(this);
     }
 
     @Override
@@ -64,6 +84,12 @@ public class MapActivity extends ActionBarActivity implements
         if (mGoogleApiClient.isConnected()) {
             mGoogleApiClient.disconnect();
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        beaconManager.unbind(this);
     }
 
     @Override
@@ -92,6 +118,7 @@ public class MapActivity extends ActionBarActivity implements
     public void onConnected(Bundle bundle) {
         mLastLocation = LocationServices.FusedLocationApi.getLastLocation(
                 mGoogleApiClient);
+        mCurrentLocation = mLastLocation;
         if (mGoogleApiClient.isConnected() && mMap != null) {
             mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(
                     new LatLng(mLastLocation.getLatitude(), mLastLocation.getLongitude()), 15));
@@ -108,6 +135,7 @@ public class MapActivity extends ActionBarActivity implements
     @Override
     public void onLocationChanged(Location location) {
         Log.i(TAG, "Location update received");
+        mCurrentLocation = location;
     }
 
     @Override
@@ -120,7 +148,7 @@ public class MapActivity extends ActionBarActivity implements
         if (mMap == null) {
             mMap = googleMap;
         }
-        mMap.setMyLocationEnabled(setMyLocation);
+        // mMap.setMyLocationEnabled(setMyLocation);
     }
 
     protected synchronized void buildGoogleApiClient() {
@@ -144,4 +172,65 @@ public class MapActivity extends ActionBarActivity implements
                 requestLocationUpdates(mGoogleApiClient, mLocationRequest, this);
     }
 
+    @Override
+    public void onBeaconServiceConnect() {
+        beaconManager.setRangeNotifier(new RangeNotifier() {
+            @Override
+            public void didRangeBeaconsInRegion(Collection<Beacon> beacons, Region region) {
+                boolean updatedBeacon = false;
+                for (Beacon b : beacons) {
+                    String mac = b.getBluetoothAddress();
+                    if (myBeacons.containsKey(mac)) {
+                        if (myBeacons.get(mac).getBeacon().getDistance() > (b.getDistance() + 5.0)) {
+                            myBeacons.get(mac).setBeacon(b);
+                            myBeacons.get(mac).setLocation(mCurrentLocation);
+                            updatedBeacon = true;
+                        }
+                    }
+                    else {
+                        BeaconLocation newBeacon = new BeaconLocation(b, mCurrentLocation);
+                        myBeacons.put(b.getBluetoothAddress(), newBeacon);
+                        drawBeacon(mCurrentLocation, b.getDistance(), newBeacon.getColor());
+                    }
+                }
+                if (updatedBeacon) {
+                    refreshBeaconsOnMap(myBeacons.values());
+                }
+            }
+        });
+
+        try {
+            beaconManager.startRangingBeaconsInRegion(new Region("myRangingUniqueId", null, null, null));
+        } catch (RemoteException e) {   }
+    }
+
+    public void drawBeacon(final Location location, final double distance, final int color) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mMap.addCircle(new CircleOptions()
+                        .center(new LatLng(location.getLatitude(), location.getLongitude()))
+                        .fillColor(color)
+                        .radius(distance * 2)
+                        .strokeWidth(1));
+            }
+        });
+    }
+
+    public void refreshBeaconsOnMap(final Collection<BeaconLocation> beacons) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mMap.clear();
+                for (BeaconLocation bl : beacons) {
+                    mMap.addCircle(new CircleOptions()
+                            .center(new LatLng(bl.getLocation().getLatitude(),
+                                    bl.getLocation().getLongitude()))
+                            .fillColor(bl.getColor())
+                            .radius(bl.getBeacon().getDistance() * 2)
+                            .strokeWidth(1));
+                }
+            }
+        });
+    }
 }

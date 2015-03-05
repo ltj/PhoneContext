@@ -9,6 +9,8 @@ import org.altbeacon.beacon.BeaconConsumer;
 import org.altbeacon.beacon.BeaconManager;
 import org.altbeacon.beacon.BeaconParser;
 
+import java.util.Collection;
+
 
 public class BeaconListActivity extends ActionBarActivity implements BeaconConsumer {
 

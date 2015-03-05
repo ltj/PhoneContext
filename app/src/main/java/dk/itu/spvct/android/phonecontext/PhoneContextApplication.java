@@ -18,6 +18,8 @@ public class PhoneContextApplication extends Application implements BootstrapNot
     protected static final String TAG = "PhoneContextApplication";
     private RegionBootstrap regionBootstrap;
     private BackgroundPowerSaver backgroundPowerSaver;
+    private MapActivity mapActivity;
+    private BeaconListActivity beaconListActivity;
 
     @Override
     public void onCreate() {
